@@ -1,0 +1,235 @@
+
+macro "macro_calcium_imaging" {
+
+	// will not run using ".nwb" files First, use the "generate_tif_files.py" python script to convert your ".nwb" files to ".tif". Then use this script on the resulting file directory
+
+	// initial processing for raw volumetric calcium imaging data, 33 z slices, 3s lead time, 5s stim time. adjust vals below to accommodate changes in experimental parameters.
+
+	// for each volumetric 2photon recording trial, generates image-stabilized videos for each z slice. When the folders for image-stabilized videos are complete for all trials for a single ant, then generates a maximum projection of the peak fold change from all slices (by default, applies 2-pixel minimum filter to each slice before max projection to reduce the impact of noise)
+
+	// requires Image Stabilizer plugin to be installed (Li, 2008: http://www.cs.cmu.edu/~kangli/code/Image_Stabilizer.html)
+
+	// specify in_dirs and out_dirs below the definition of the max_projection function
+
+	function contains( array, value ) {
+	    for (i=0; i<array.length; i++) 
+	        if ( array[i] == value ) return true;
+	    return false;
+	}
+
+
+	function get_index( array, value ) {
+	    for (i=0; i<array.length; i++) 
+	        if ( array[i] == value ) return i;
+	    return -1;
+	}
+
+	function list_windows() {
+  		list = getList("image.titles");
+ 		if (list.length==0)
+   			print("No image windows are open");
+  		else {
+   			print("Image windows:");
+  			for (i=0; i<list.length; i++)
+        			print("   "+list[i]);
+ 		 }
+ 		print("");
+	}
+
+	function max_project(openDir, min_pixel_radius, baseEnd, startVal, stopVal, upperBound, lowerBound) {
+
+		list = getFileList(openDir);
+
+		for (v=0; v<list.length; v++) {
+
+			currentDir = openDir+list[v]; // looping through each trial 
+	
+			curr_title = list[v];
+			curr_title = substring(curr_title,0,lengthOf(curr_title)-1);
+			curr_title = replace(curr_title, "\.", "_");
+			max_project_title = curr_title + "_max_proj";
+
+			// loop through
+			trial_dir = currentDir;
+			slices_list = getFileList(trial_dir);
+			dir_files_list = getFileList(openDir);
+
+			if (contains(dir_files_list, max_project_title+".tif")) {
+				print(trial_dir);
+				print("seems complete, skipping");
+				close("*");
+				continue;
+			}
+
+			if (matches(curr_title, ".*_peak_response_files")) { // if it is a peak response file
+
+				for (q=0; q<slices_list.length; q++) {
+					if (!matches(slices_list[q], ".*raw_data_slice_t-series.*") ) {
+						continue;
+					}
+
+					slice_name = slices_list[q];
+
+					slice_n = split(slice_name, "_");
+					slice_n = split(slice_n[lengthOf(slice_n)-1], "u");
+					slice_n = slice_n[0];
+
+		
+					slice_num = parseInt(slice_n);
+	
+					files_here = getFileList(trial_dir);
+	
+					if (slice_num <1) {
+						continue;
+					}
+
+					open(trial_dir+slices_list[q]);
+					slice_img = getTitle();
+
+
+					if (isNaN(slice_num)) {
+						continue;
+					}
+
+					new_t = getTitle();
+					save_out = trial_dir + "slice_ts_raw_" + slice_num;
+			
+					run("Z Project...", "start=1 stop=baseEnd projection=[Average Intensity]");
+					Baseline = getTitle();
+					imageCalculator("Subtract create 32-bit stack", slice_img,Baseline);
+					Subtracted = getTitle();
+					imageCalculator("Divide create 32-bit stack",Subtracted,Baseline);
+					run("Z Project...", "start=startVal stop=stopVal projection=[Average Intensity]");
+					changeValues(upperBound, 1/0, upperBound); // set the upper bound. this will equalize the scaling factors for visual assessment
+					changeValues(-1/0, lowerBound, lowerBound); // set the lower bound
+
+					run("Minimum...", "radius=min_pixel_radius");
+					averaged = getTitle();
+	
+					close(slice_img);
+					close(Baseline);
+					close(Subtracted);
+
+				}
+
+				run("Images to Stack", "name=Stack title=[] use");
+				run("Z Project...", "projection=[Max Intensity]");
+				
+				changeValues(upperBound, 1/0, upperBound);
+				changeValues(-1/0, lowerBound, lowerBound);
+				saveAs("TIFF", openDir + max_project_title);
+				close("*");
+	
+			}
+			close("*");
+		}
+	}
+	periodVal = 1.2; // the period of the volume under my experimental parameters
+
+	numSlice = 33;
+	baseEnd = 5; // baseline is defined as the mean of frames 1-5. 
+
+	startVal = 9; // peak fold change is defined as the mean of frames 9-14.
+	stopVal = 14;
+
+	min_pixel_radius = 2; // value for the minimum filter -- used to reduce the impact of visual noise on the max projection
+
+	upperBound = 4; // maximum dF/F value for max projection
+	lowerBound = -1; // minimum df/F value
+
+
+	out_dirs = newArray("/Volumes/My Passport/test_max_proj1/");
+
+	in_dirs = newArray("/Volumes/My Passport/test_reconstituted_tifs/2-10-23-ecl-11-11-22-bilateral/"); // in_dirs should be an array of directory paths specifying each experiment date. Recursively nested within each date folder should be a sub-folder for each ant, a further sub-folder for each trial, each containing one .tif file for each z-plane. These files should be generated using "generate_tif_files.py"
+
+	for (k=0; k<out_dirs.length; k++) {
+
+	day_outdir = out_dirs[k];
+	day_indir = in_dirs[k];
+
+	ant_indirs = getFileList(day_indir);
+
+	for (u=0; u<ant_indirs.length; u++) {
+
+	ant_outdir = ant_indirs[u];
+
+	File.makeDirectory(day_outdir+ant_outdir);
+
+	ant_indir = ant_indirs[u];
+	
+	trialslist = getFileList(day_indir+ant_indir);
+
+	for (j=0; j<trialslist.length; j++) {
+
+	curr_title = trialslist[j];
+
+	current_indir = day_indir+ant_indir+curr_title;
+	curr_title = substring(curr_title,0,lengthOf(curr_title)-1);
+	curr_title = curr_title + "_peak_response_files/";
+	curr_title = replace(curr_title, "\.", "_");
+
+	current_outdir = day_outdir+ant_outdir + curr_title;
+	current_outdir = replace(current_outdir, "\.", "_");
+
+	current_file_list = getFileList(current_outdir);
+	
+
+	if (contains(current_file_list, "raw_data_slice_t-series_160um.tif") ) { 
+							// skip already completed analyses
+		close("*");
+		print("already ran, skipped- " + curr_title);
+		continue;
+	}
+
+	for (i=0; i<current_file_list.length; i++) { 
+		print("already processed some files: ");
+		print(current_file_list[i]);
+	}
+
+
+	File.makeDirectory(current_outdir);
+
+	imgArray = getFileList(current_indir);
+	for (i=0; i<imgArray.length; i++) {
+
+		img_path = current_indir+"/"+imgArray[i];
+		run("Bio-Formats Windowless Importer", "open=img_path autoscale color_mode=Default quiet rois_import=[ROI manager] view=[Standard ImageJ] stack_order=Default" );
+	
+	}
+
+	for (i=0; i< numSlice; i++) {
+	
+		selectImage(imgArray[i]);
+	
+		CurrentStack = getTitle();
+		sliceNum = i+1;
+		adjust_sliceNum = sliceNum+0;
+
+
+		z_vals = split(CurrentStack, "z");
+		z_vals = split(z_vals[1], "u");
+		z_val = z_vals[0];
+
+		save_out = "raw_data_slice_t-series_" + z_val+ "um";
+
+
+		if (contains(current_file_list, save_out)) 
+			continue;
+
+		run("Image Stabilizer", "transformation=Translation maximum_pyramid_levels=1 template_update_coefficient=0.90 maximum_iterations=200 error_tolerance=0.0000001"); // comment out if you want to skip the image stabilization step
+		
+		stabilized = getTitle();
+
+		saveAs("TIFF", current_outdir + save_out);
+
+		close(save_out);
+		close(stabilized);
+
+	}
+
+	close("*");
+	}
+
+	max_project(day_outdir+ant_outdir, min_pixel_radius, baseEnd, startVal, stopVal, upperBound, lowerBound);
+}
+}
