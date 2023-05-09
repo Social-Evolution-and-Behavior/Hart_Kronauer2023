@@ -11,7 +11,7 @@ macro "macro_calcium_imaging" {
 
 	// specify in_dirs and out_dirs below the definition of the max_projection function
 
-	
+	// written by Taylor Hart	
 
 	function contains( array, value ) {
 	    for (i=0; i<array.length; i++) 
