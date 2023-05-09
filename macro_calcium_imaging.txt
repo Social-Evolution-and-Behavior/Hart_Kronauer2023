@@ -1,15 +1,17 @@
 
 macro "macro_calcium_imaging" {
 
-	// will not run using ".nwb" files First, use the "generate_tif_files.py" python script to convert your ".nwb" files to ".tif". Then use this script on the resulting file directory
+	// will not run using ".nwb" files. First, use the "generate_tif_files.py" python script to convert your ".nwb" files to ".tif". Then use this script, after specifying the appropriate input and output directories below
 
-	// initial processing for raw volumetric calcium imaging data, 33 z slices, 3s lead time, 5s stim time. adjust vals below to accommodate changes in experimental parameters.
+	// initial processing for raw volumetric calcium imaging data, 33 z slices at 5um increments, 3s lead time, 5s stim time. adjust vals below to accommodate changes in experimental parameters.
 
 	// for each volumetric 2photon recording trial, generates image-stabilized videos for each z slice. When the folders for image-stabilized videos are complete for all trials for a single ant, then generates a maximum projection of the peak fold change from all slices (by default, applies 2-pixel minimum filter to each slice before max projection to reduce the impact of noise)
 
 	// requires Image Stabilizer plugin to be installed (Li, 2008: http://www.cs.cmu.edu/~kangli/code/Image_Stabilizer.html)
 
 	// specify in_dirs and out_dirs below the definition of the max_projection function
+
+	
 
 	function contains( array, value ) {
 	    for (i=0; i<array.length; i++) 
@@ -49,7 +51,6 @@ macro "macro_calcium_imaging" {
 			curr_title = replace(curr_title, "\.", "_");
 			max_project_title = curr_title + "_max_proj";
 
-			// loop through
 			trial_dir = currentDir;
 			slices_list = getFileList(trial_dir);
 			dir_files_list = getFileList(openDir);
@@ -61,10 +62,10 @@ macro "macro_calcium_imaging" {
 				continue;
 			}
 
-			if (matches(curr_title, ".*_peak_response_files")) { // if it is a peak response file
+			if (matches(curr_title, ".*_peak_response_files")) {
 
 				for (q=0; q<slices_list.length; q++) {
-					if (!matches(slices_list[q], ".*raw_data_slice_t-series.*") ) {
+					if (!matches(slices_list[q], ".*stabilized_t-series.*") ) {
 						continue;
 					}
 
@@ -90,10 +91,8 @@ macro "macro_calcium_imaging" {
 					if (isNaN(slice_num)) {
 						continue;
 					}
-
-					new_t = getTitle();
-					save_out = trial_dir + "slice_ts_raw_" + slice_num;
 			
+					// the steps below will calculate deltaF/F0
 					run("Z Project...", "start=1 stop=baseEnd projection=[Average Intensity]");
 					Baseline = getTitle();
 					imageCalculator("Subtract create 32-bit stack", slice_img,Baseline);
@@ -129,6 +128,10 @@ macro "macro_calcium_imaging" {
 	numSlice = 33;
 	baseEnd = 5; // baseline is defined as the mean of frames 1-5. 
 
+	zIncrement = 5; // distance between z planes in micrometers
+
+	zFinal = (numSlice-1) * zIncrement;
+
 	startVal = 9; // peak fold change is defined as the mean of frames 9-14.
 	stopVal = 14;
 
@@ -138,9 +141,9 @@ macro "macro_calcium_imaging" {
 	lowerBound = -1; // minimum df/F value
 
 
-	out_dirs = newArray("/Volumes/My Passport/test_max_proj1/");
+	out_dirs = newArray();
 
-	in_dirs = newArray("/Volumes/My Passport/test_reconstituted_tifs/2-10-23-ecl-11-11-22-bilateral/"); // in_dirs should be an array of directory paths specifying each experiment date. Recursively nested within each date folder should be a sub-folder for each ant, a further sub-folder for each trial, each containing one .tif file for each z-plane. These files should be generated using "generate_tif_files.py"
+	in_dirs = newArray(); // in_dirs should be an array of directory paths specifying each experiment date. Recursively nested within each date folder should be a sub-folder for each ant, a further sub-folder for each trial, each containing one .tif file for each z-plane. These files should be generated using "generate_tif_files.py"
 
 	for (k=0; k<out_dirs.length; k++) {
 
@@ -173,8 +176,9 @@ macro "macro_calcium_imaging" {
 
 	current_file_list = getFileList(current_outdir);
 	
+	final_file = "stabilized_t-series_" + zFinal + "um.tif";
 
-	if (contains(current_file_list, "raw_data_slice_t-series_160um.tif") ) { 
+	if (contains(current_file_list, final_file) ) { 
 							// skip already completed analyses
 		close("*");
 		print("already ran, skipped- " + curr_title);
@@ -196,7 +200,8 @@ macro "macro_calcium_imaging" {
 		run("Bio-Formats Windowless Importer", "open=img_path autoscale color_mode=Default quiet rois_import=[ROI manager] view=[Standard ImageJ] stack_order=Default" );
 	
 	}
-
+	
+	// loops through each z-position and runs the Image Stabilizer plugin, then saves the resulting file
 	for (i=0; i< numSlice; i++) {
 	
 		selectImage(imgArray[i]);
@@ -210,7 +215,7 @@ macro "macro_calcium_imaging" {
 		z_vals = split(z_vals[1], "u");
 		z_val = z_vals[0];
 
-		save_out = "raw_data_slice_t-series_" + z_val+ "um";
+		save_out = "stabilized_t-series_" + z_val+ "um";
 
 
 		if (contains(current_file_list, save_out)) 
@@ -230,6 +235,7 @@ macro "macro_calcium_imaging" {
 	close("*");
 	}
 
+	// after running image stabilization, generates a maximum projection of the deltaF/F0 values across all z-planes
 	max_project(day_outdir+ant_outdir, min_pixel_radius, baseEnd, startVal, stopVal, upperBound, lowerBound);
 }
 }
